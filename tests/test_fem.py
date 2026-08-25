@@ -3,7 +3,15 @@
 import numpy as np
 import pytest
 
-from trussgnn import Edge, InvalidEdgeError, Node, Truss, UnstableStructureError, solve_truss
+from trussgnn import (
+    Edge,
+    InvalidEdgeError,
+    Node,
+    Truss,
+    UnstableStructureError,
+    edge_stiffness,
+    solve_truss,
+)
 
 
 def triangular_truss() -> Truss:
@@ -36,6 +44,34 @@ def test_single_horizontal_bar_matches_analytical_displacement() -> None:
     assert solution.displacements[1, 0] == pytest.approx(load * length / (youngs_modulus * area))
     assert solution.displacements[[0, 0, 1], [0, 1, 1]] == pytest.approx(0.0)
     assert solution.reactions[0, 0] == pytest.approx(-load)
+
+
+def test_diagonal_edge_stiffness_has_expected_coupling() -> None:
+    youngs_modulus = 200.0e9
+    area = 1.0e-3
+
+    node_i = Node(0.0, 0.0)
+    node_j = Node(1.0, 1.0)
+
+    actual = edge_stiffness(
+        node_i,
+        node_j,
+        youngs_modulus,
+        area,
+    )
+
+    factor = youngs_modulus * area / np.sqrt(2.0)
+
+    expected = factor * np.array(
+        [
+            [0.5, 0.5, -0.5, -0.5],
+            [0.5, 0.5, -0.5, -0.5],
+            [-0.5, -0.5, 0.5, 0.5],
+            [-0.5, -0.5, 0.5, 0.5],
+        ]
+    )
+
+    assert actual == pytest.approx(expected)
 
 
 def test_triangular_truss_is_finite_constrained_and_balanced() -> None:
