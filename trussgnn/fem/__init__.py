@@ -1,6 +1,6 @@
-"""Public API for the TrussGNN mechanics package."""
+"""Finite-element data structures and solver."""
 
-from .fem import (
+from .solver import (
     Edge,
     InvalidEdgeError,
     Node,

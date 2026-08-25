@@ -18,6 +18,9 @@ build/
 dist/
 *.egg-info/
 
+# Generated datasets (root artifacts, not the trussgnn.data source package)
+/data/
+
 # Editors and operating systems
 .vscode/
 .idea/

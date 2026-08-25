@@ -7,10 +7,17 @@ name = "trussgnn"
 version = "0.1.0"
 description = "Minimal linear-static 2D truss mechanics for TrussGNN"
 requires-python = ">=3.11"
-dependencies = ["numpy>=1.26"]
+dependencies = [
+    "numpy>=1.26",
+    "torch>=2.7",
+    "torch-geometric>=2.5",
+]
 
 [project.optional-dependencies]
 test = ["pytest>=7.4"]
+
+[tool.setuptools.packages.find]
+include = ["trussgnn*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
