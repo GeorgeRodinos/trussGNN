@@ -21,6 +21,12 @@ dist/
 # Generated datasets (root artifacts, not the trussgnn.data source package)
 /data/
 
+# Local MLflow tracking and artifact state
+mlruns/
+mlartifacts/
+mlflow.db
+.mlflow/
+
 # Editors and operating systems
 .vscode/
 .idea/
