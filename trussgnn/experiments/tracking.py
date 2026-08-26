@@ -88,8 +88,12 @@ def redact_tracking_uri(uri: str) -> str:
     host = parsed.hostname or ""
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
-    if parsed.port is not None:
-        host = f"{host}:{parsed.port}"
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    if port is not None:
+        host = f"{host}:{port}"
     if parsed.username is not None or parsed.password is not None:
         host = f"<redacted>@{host}"
 

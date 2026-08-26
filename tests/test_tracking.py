@@ -105,6 +105,17 @@ def test_sensitive_uri_components_are_redacted() -> None:
         assert secret not in displayed
 
 
+def test_malformed_port_is_safely_omitted_during_redaction() -> None:
+    uri = "http://private-user:private-password@127.0.0.1:notaport/path?token=secret"
+
+    displayed = redact_tracking_uri(uri)
+    message = f"Unable to connect to: {displayed}"
+
+    assert displayed == "http://<redacted>@127.0.0.1/path?<redacted>"
+    for secret in ("private-user", "private-password", "notaport", "token", "secret"):
+        assert secret not in message
+
+
 def test_invalid_explicit_endpoint_raises_without_fallback(monkeypatch) -> None:
     monkeypatch.setenv("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "0")
     monkeypatch.setenv("MLFLOW_HTTP_REQUEST_TIMEOUT", "1")
