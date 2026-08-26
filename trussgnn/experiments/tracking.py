@@ -123,6 +123,18 @@ def _get_or_create_experiment(client: MlflowClient, config: TrackingConfig) -> E
     return experiment
 
 
+def configure_experiment(config: TrackingConfig) -> Experiment:
+    """Configure MLflow and create or select the requested experiment safely."""
+
+    try:
+        return _get_or_create_experiment(_configure_mlflow(config), config)
+    except Exception:
+        safe_uri = redact_tracking_uri(config.tracking_uri)
+        raise TrackingConnectionError(
+            f"Unable to use configured MLflow tracking destination: {safe_uri}"
+        ) from None
+
+
 def _log_connection_check(experiment_id: str, run_name: str) -> str:
     """Log and close one short Phase 4A run."""
 
@@ -147,8 +159,7 @@ def run_connection_check(
     """Create/select an experiment and record one short, finished smoke run."""
 
     try:
-        client = _configure_mlflow(config)
-        experiment = _get_or_create_experiment(client, config)
+        experiment = configure_experiment(config)
         run_id = _log_connection_check(experiment.experiment_id, run_name)
     except Exception:
         if mlflow.active_run() is not None:
