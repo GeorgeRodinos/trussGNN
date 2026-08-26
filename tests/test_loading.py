@@ -97,6 +97,42 @@ def test_inverse_targets_recovers_raw_displacements(loaded) -> None:
     assert torch.allclose(recovered, raw.y)
 
 
+def test_inverse_targets_preserves_input_dtype(loaded) -> None:
+    values = loaded.splits["train"][0].y.to(torch.float64)
+
+    recovered = inverse_targets(values, loaded.normalization)
+
+    assert recovered.dtype == torch.float64
+
+
+def test_normalization_aligns_statistics_to_float64_inputs(loaded) -> None:
+    graph = loaded.raw_splits["train"][0].clone()
+    graph.x = graph.x.to(torch.float64)
+    graph.edge_attr = graph.edge_attr.to(torch.float64)
+    graph.y = graph.y.to(torch.float64)
+
+    prepared = prepare_graph(graph, loaded.normalization)
+
+    assert prepared.x.dtype == torch.float64
+    assert prepared.edge_attr.dtype == torch.float64
+    assert prepared.y.dtype == torch.float64
+    assert torch.isfinite(prepared.x).all()
+    assert torch.isfinite(prepared.edge_attr).all()
+    assert torch.isfinite(prepared.y).all()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
+def test_target_normalization_and_inverse_remain_on_cuda(loaded) -> None:
+    graph = loaded.raw_splits["train"][0].clone().to("cuda")
+
+    prepared = prepare_graph(graph, loaded.normalization)
+    recovered = inverse_targets(prepared.y, loaded.normalization)
+
+    assert prepared.y.device.type == "cuda"
+    assert recovered.device.type == "cuda"
+    assert torch.allclose(recovered, graph.y)
+
+
 def test_zero_standard_deviation_fallback_is_finite(loaded) -> None:
     stats = replace(
         loaded.normalization,

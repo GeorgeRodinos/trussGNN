@@ -90,13 +90,18 @@ def prepare_graph(graph: Data, stats: NormalizationStats) -> Data:
     if not torch.all((support_flags == 0) | (support_flags == 1)):
         raise ValueError("Support flags must be exactly 0.0 or 1.0")
 
-    prepared.x[:, :4] = (prepared.x[:, :4] - stats.node_mean) / stats.safe_std(
-        stats.node_std
-    )
-    prepared.edge_attr = (prepared.edge_attr - stats.edge_mean) / stats.safe_std(
-        stats.edge_std
-    )
-    prepared.y = (prepared.y - stats.target_mean) / stats.safe_std(stats.target_std)
+    node_values = prepared.x[:, :4]
+    node_mean = stats.node_mean.to(node_values)
+    node_std = stats.safe_std(stats.node_std).to(node_values)
+    prepared.x[:, :4] = (node_values - node_mean) / node_std
+
+    edge_mean = stats.edge_mean.to(prepared.edge_attr)
+    edge_std = stats.safe_std(stats.edge_std).to(prepared.edge_attr)
+    prepared.edge_attr = (prepared.edge_attr - edge_mean) / edge_std
+
+    target_mean = stats.target_mean.to(prepared.y)
+    target_std = stats.safe_std(stats.target_std).to(prepared.y)
+    prepared.y = (prepared.y - target_mean) / target_std
     prepared.free_dof_mask = support_flags == 0
     prepared.validate(raise_on_error=True)
     return prepared
@@ -120,7 +125,9 @@ def load_dataset(directory: str | Path) -> LoadedDataset:
 def inverse_targets(values: torch.Tensor, stats: NormalizationStats) -> torch.Tensor:
     """Convert normalized displacements back to physical metres."""
 
-    return values * stats.safe_std(stats.target_std) + stats.target_mean
+    target_mean = stats.target_mean.to(values)
+    target_std = stats.safe_std(stats.target_std).to(values)
+    return values * target_std + target_mean
 
 
 def enforce_boundary_conditions(
