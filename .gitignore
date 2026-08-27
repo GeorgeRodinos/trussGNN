@@ -20,6 +20,7 @@ dist/
 
 # Generated datasets (root artifacts, not the trussgnn.data source package)
 /data/
+/artifacts/
 
 # Local MLflow tracking and artifact state
 mlruns/
