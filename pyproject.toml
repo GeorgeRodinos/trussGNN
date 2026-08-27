@@ -12,6 +12,7 @@ dependencies = [
     "torch>=2.7",
     "torch-geometric>=2.5",
     "mlflow>=3,<4",
+    "matplotlib>=3.8",
 ]
 
 [project.optional-dependencies]
