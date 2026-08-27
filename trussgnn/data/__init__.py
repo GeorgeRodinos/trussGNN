@@ -5,7 +5,6 @@ from .generation import GenerationConfig
 from .loading import (
     LoadedDataset,
     NormalizationStats,
-    build_dataset_manifest,
     create_data_loaders,
     enforce_boundary_conditions,
     inverse_targets,
@@ -19,7 +18,6 @@ __all__ = [
     "GenerationConfig",
     "LoadedDataset",
     "NormalizationStats",
-    "build_dataset_manifest",
     "create_data_loaders",
     "enforce_boundary_conditions",
     "generate_dataset",

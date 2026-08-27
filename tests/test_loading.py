@@ -1,6 +1,5 @@
 """Verification of Phase 4B loading, normalization, batching, and identity."""
 
-import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -8,11 +7,9 @@ from pathlib import Path
 import pytest
 import torch
 
-from trussgnn.data.dataset import generate_dataset, save_dataset
+from trussgnn.data.dataset import generate_dataset, load_split, save_dataset
 from trussgnn.data.generation import SPLIT_NAMES, GenerationConfig
 from trussgnn.data.loading import (
-    DATASET_FILES,
-    build_dataset_manifest,
     create_data_loaders,
     enforce_boundary_conditions,
     inverse_targets,
@@ -38,6 +35,11 @@ def loaded(dataset_directory):
     return load_dataset(dataset_directory)
 
 
+@pytest.fixture(scope="module")
+def raw_splits(dataset_directory):
+    return {name: load_split(dataset_directory, name) for name in SPLIT_NAMES}
+
+
 def graph_order(loader) -> list[int]:
     return [int(graph_id) for batch in loader for graph_id in batch.graph_id]
 
@@ -45,14 +47,14 @@ def graph_order(loader) -> list[int]:
 def test_all_splits_load_with_expected_counts_and_validate(loaded) -> None:
     expected = {name: (4 if name == "train" else 2) for name in SPLIT_NAMES}
 
-    assert {name: len(graphs) for name, graphs in loaded.raw_splits.items()} == expected
-    for graphs in loaded.raw_splits.values():
+    assert {name: len(graphs) for name, graphs in loaded.splits.items()} == expected
+    for graphs in loaded.splits.values():
         for graph in graphs:
             assert graph.validate(raise_on_error=True)
 
 
-def test_continuous_nodes_and_support_flags_are_prepared_correctly(loaded) -> None:
-    raw = loaded.raw_splits["train"][0]
+def test_continuous_nodes_and_support_flags_are_prepared_correctly(loaded, raw_splits) -> None:
+    raw = raw_splits["train"][0]
     prepared = loaded.splits["train"][0]
     stats = loaded.normalization
     expected = (raw.x[:, :4] - stats.node_mean) / stats.safe_std(stats.node_std)
@@ -62,8 +64,8 @@ def test_continuous_nodes_and_support_flags_are_prepared_correctly(loaded) -> No
     assert torch.all((prepared.x[:, 4:6] == 0) | (prepared.x[:, 4:6] == 1))
 
 
-def test_edge_features_and_targets_match_direct_normalization(loaded) -> None:
-    raw = loaded.raw_splits["train"][0]
+def test_edge_features_and_targets_match_direct_normalization(loaded, raw_splits) -> None:
+    raw = raw_splits["train"][0]
     prepared = loaded.splits["train"][0]
     stats = loaded.normalization
 
@@ -73,8 +75,8 @@ def test_edge_features_and_targets_match_direct_normalization(loaded) -> None:
     assert torch.allclose(prepared.y, expected_targets)
 
 
-def test_positions_and_graph_metadata_remain_raw(loaded) -> None:
-    raw = loaded.raw_splits["train"][0]
+def test_positions_and_graph_metadata_remain_raw(loaded, raw_splits) -> None:
+    raw = raw_splits["train"][0]
     prepared = loaded.splits["train"][0]
 
     for name in (
@@ -89,9 +91,9 @@ def test_positions_and_graph_metadata_remain_raw(loaded) -> None:
         assert torch.equal(prepared[name], raw[name])
 
 
-def test_inverse_targets_recovers_raw_displacements(loaded) -> None:
+def test_inverse_targets_recovers_raw_displacements(loaded, raw_splits) -> None:
     prepared = loaded.splits["train"][0]
-    raw = loaded.raw_splits["train"][0]
+    raw = raw_splits["train"][0]
 
     recovered = inverse_targets(prepared.y, loaded.normalization)
     assert torch.allclose(recovered, raw.y)
@@ -105,8 +107,8 @@ def test_inverse_targets_preserves_input_dtype(loaded) -> None:
     assert recovered.dtype == torch.float64
 
 
-def test_normalization_aligns_statistics_to_float64_inputs(loaded) -> None:
-    graph = loaded.raw_splits["train"][0].clone()
+def test_normalization_aligns_statistics_to_float64_inputs(loaded, raw_splits) -> None:
+    graph = raw_splits["train"][0].clone()
     graph.x = graph.x.to(torch.float64)
     graph.edge_attr = graph.edge_attr.to(torch.float64)
     graph.y = graph.y.to(torch.float64)
@@ -122,8 +124,8 @@ def test_normalization_aligns_statistics_to_float64_inputs(loaded) -> None:
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
-def test_target_normalization_and_inverse_remain_on_cuda(loaded) -> None:
-    graph = loaded.raw_splits["train"][0].clone().to("cuda")
+def test_target_normalization_and_inverse_remain_on_cuda(loaded, raw_splits) -> None:
+    graph = raw_splits["train"][0].clone().to("cuda")
 
     prepared = prepare_graph(graph, loaded.normalization)
     recovered = inverse_targets(prepared.y, loaded.normalization)
@@ -133,7 +135,7 @@ def test_target_normalization_and_inverse_remain_on_cuda(loaded) -> None:
     assert torch.allclose(recovered, graph.y)
 
 
-def test_zero_standard_deviation_fallback_is_finite(loaded) -> None:
+def test_zero_standard_deviation_fallback_is_finite(loaded, raw_splits) -> None:
     stats = replace(
         loaded.normalization,
         node_std=torch.zeros(4),
@@ -141,14 +143,14 @@ def test_zero_standard_deviation_fallback_is_finite(loaded) -> None:
         target_std=torch.zeros(2),
     )
 
-    prepared = prepare_graph(loaded.raw_splits["train"][0], stats)
+    prepared = prepare_graph(raw_splits["train"][0], stats)
     assert torch.isfinite(prepared.x).all()
     assert torch.isfinite(prepared.edge_attr).all()
     assert torch.isfinite(prepared.y).all()
 
 
-def test_preparation_does_not_modify_raw_graph(loaded) -> None:
-    raw = loaded.raw_splits["train"][0]
+def test_preparation_does_not_modify_raw_graph(loaded, raw_splits) -> None:
+    raw = raw_splits["train"][0]
     before = {name: value.clone() for name, value in raw if isinstance(value, torch.Tensor)}
 
     prepare_graph(raw, loaded.normalization)
@@ -157,8 +159,8 @@ def test_preparation_does_not_modify_raw_graph(loaded) -> None:
         assert torch.equal(raw[name], value)
 
 
-def test_free_dof_mask_has_expected_shape_dtype_and_values(loaded) -> None:
-    raw = loaded.raw_splits["train"][0]
+def test_free_dof_mask_has_expected_shape_dtype_and_values(loaded, raw_splits) -> None:
+    raw = raw_splits["train"][0]
     prepared = loaded.splits["train"][0]
 
     assert prepared.free_dof_mask.shape == (raw.num_nodes, 2)
@@ -204,26 +206,8 @@ def test_evaluation_loader_order_is_unchanged_and_deterministic(loaded) -> None:
         assert graph_order(second[name]) == expected
 
 
-def test_manifest_file_identity_and_dataset_information(dataset_directory) -> None:
-    manifest = build_dataset_manifest(dataset_directory)
-    entries = {entry["filename"]: entry for entry in manifest["files"]}
-
-    assert set(entries) == set(DATASET_FILES)
-    for filename, entry in entries.items():
-        content = (dataset_directory / filename).read_bytes()
-        assert entry["size_bytes"] == len(content)
-        assert entry["sha256"] == hashlib.sha256(content).hexdigest()
-    assert manifest["dataset_seed"] == 31
-    assert manifest["split_counts"] == {name: (4 if name == "train" else 2) for name in SPLIT_NAMES}
-    assert manifest["normalization_source_split"] == "train"
-
-
-def test_manifest_is_deterministic(dataset_directory) -> None:
-    assert build_dataset_manifest(dataset_directory) == build_dataset_manifest(dataset_directory)
-
-
-def test_normalization_matches_phase3_training_statistics(loaded) -> None:
-    training_nodes = torch.cat([graph.x[:, :4] for graph in loaded.raw_splits["train"]])
+def test_normalization_matches_phase3_training_statistics(loaded, raw_splits) -> None:
+    training_nodes = torch.cat([graph.x[:, :4] for graph in raw_splits["train"]])
     stats = loaded.normalization
 
     assert stats.source_split == "train"

@@ -1,6 +1,5 @@
 """Load, normalize, batch, and identify an accepted Phase 3 dataset."""
 
-import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,9 +39,8 @@ class NormalizationStats:
 
 @dataclass(frozen=True)
 class LoadedDataset:
-    """Raw graphs, prepared clones, metadata, and training statistics."""
+    """Prepared graph splits, metadata, and training statistics."""
 
-    raw_splits: dict[str, list[Data]]
     splits: dict[str, list[Data]]
     normalization: NormalizationStats
     metadata: dict[str, object]
@@ -119,7 +117,7 @@ def load_dataset(directory: str | Path) -> LoadedDataset:
         for name, graphs in raw_splits.items()
     }
     metadata = json.loads((directory / "metadata.json").read_text(encoding="utf-8"))
-    return LoadedDataset(raw_splits, splits, normalization, metadata)
+    return LoadedDataset(splits, normalization, metadata)
 
 
 def inverse_targets(values: torch.Tensor, stats: NormalizationStats) -> torch.Tensor:
@@ -168,34 +166,3 @@ def create_data_loaders(
             generator=generator,
         )
     return loaders
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as file:
-        for chunk in iter(lambda: file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def build_dataset_manifest(directory: str | Path) -> dict[str, object]:
-    """Describe the exact Phase 3 files and dataset-level identity information."""
-
-    directory = Path(directory)
-    _require_dataset_files(directory)
-    normalization = load_normalization(directory)
-    metadata = json.loads((directory / "metadata.json").read_text(encoding="utf-8"))
-    files = [
-        {
-            "filename": name,
-            "size_bytes": (directory / name).stat().st_size,
-            "sha256": _sha256(directory / name),
-        }
-        for name in DATASET_FILES
-    ]
-    return {
-        "files": files,
-        "dataset_seed": metadata["seed"],
-        "split_counts": metadata["split_counts"],
-        "normalization_source_split": normalization.source_split,
-    }

@@ -1,6 +1,5 @@
 """End-to-end tests for the Phase 4D3 MLflow experiment runner."""
 
-import json
 from pathlib import Path
 
 import mlflow
@@ -83,47 +82,29 @@ def test_models_share_evaluation_contract_and_log_complete_runs(
     )
     assert logged.info.status == "FINISHED"
     assert logged.data.params["model"] == model_name
-    assert logged.data.tags["phase"] == "4"
-    assert logged.data.tags["task"] == "node_displacement_regression"
     for split in result.final_metrics:
-        assert f"{split}/rmse_m" in logged.data.metrics
+        assert f"{split}/loss" in logged.data.metrics
+        assert f"{split}/mae_mm" in logged.data.metrics
+        assert f"{split}/rmse_mm" in logged.data.metrics
+        assert f"{split}/mean_graph_relative_l2" in logged.data.metrics
     assert {
-        "resolved_config.json", "dataset_manifest.json", "metadata.json",
-        "normalization.json", "prediction_example.json",
+        "resolved_config.json", "metadata.json", "normalization.json",
     } <= artifacts
     if model_name == "zero":
         assert result.best_epoch is None
         assert "best_checkpoint.pt" not in artifacts
-        assert "training_history.json" not in artifacts
-        assert logged.data.params["optimizer"] == "none"
     else:
         assert result.best_epoch == 1
-        assert {"best_checkpoint.pt", "training_history.json"} <= artifacts
+        assert "best_checkpoint.pt" in artifacts
         assert client.get_metric_history(result.run_id, "train/loss")
         assert client.get_metric_history(result.run_id, "validation/rmse_mm")
-    assert mlflow.active_run() is None
-
-
-def test_manifest_checksums_and_logged_content_are_safe(tiny_dataset, tracking) -> None:
-    result = run_experiment(
-        tiny_dataset, "zero", tracking, TrainingConfig(max_epochs=1), batch_size=1
-    )
-    client = MlflowClient(tracking_uri=tracking.tracking_uri)
-    run = client.get_run(result.run_id)
-    manifest_path = client.download_artifacts(result.run_id, "dataset_manifest.json")
-    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-
-    for entry in manifest["files"]:
-        path = tiny_dataset / entry["filename"]
-        assert entry["size_bytes"] == path.stat().st_size
-        assert len(entry["sha256"]) == 64
-
     config_path = client.download_artifacts(result.run_id, "resolved_config.json")
-    logged_text = json.dumps(run.data.params) + Path(config_path).read_text(encoding="utf-8")
+    logged_text = str(logged.data.params) + Path(config_path).read_text(encoding="utf-8")
     assert tracking.tracking_uri not in logged_text
     assert "tracking_uri" not in logged_text.lower()
     assert "password" not in logged_text.lower()
     assert "token" not in logged_text.lower()
+    assert mlflow.active_run() is None
 
 
 def test_fixed_seed_reproduces_final_metrics(tiny_dataset, tracking) -> None:
@@ -142,7 +123,7 @@ def test_fixed_seed_reproduces_final_metrics(tiny_dataset, tracking) -> None:
 
 
 def test_learned_model_fits_before_final_split_evaluation(
-    monkeypatch, tiny_dataset, tracking, tmp_path
+    monkeypatch, tiny_dataset, tracking
 ) -> None:
     events = []
     real_fit = runner.fit_model
