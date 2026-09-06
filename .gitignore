@@ -1,0 +1,30 @@
+# Python caches and test output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+
+# Package build output
+build/
+dist/
+*.egg-info/
+
+# Generated datasets (root artifacts, not the trussgnn.data source package)
+/data/
+/artifacts/
+
+# Local MLflow tracking and artifact state
+mlruns/
+mlartifacts/
+mlflow.db
+.mlflow/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
