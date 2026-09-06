@@ -1,4 +1,4 @@
-"""Focused offline tests for the three Phase 5C figures."""
+"""Focused offline tests for the three evaluation figures."""
 
 from types import SimpleNamespace
 
@@ -7,7 +7,7 @@ import torch
 from torch_geometric.data import Data
 
 from trussgnn.analysis.plot_results import (
-    phase5a_statistics,
+    split_rmse_statistics,
     plot_error_analysis,
     plot_model_comparison,
     plot_representative_prediction,
@@ -18,17 +18,18 @@ from trussgnn.data import NormalizationStats
 
 
 class FakeClient:
-    def __init__(self, metrics):
+    def __init__(self, metrics, experiment_id="12"):
         self.metrics = metrics
+        self.experiment_id = experiment_id
 
     def get_run(self, run_id):
         return SimpleNamespace(
-            info=SimpleNamespace(status="FINISHED"),
+            info=SimpleNamespace(status="FINISHED", experiment_id=self.experiment_id),
             data=SimpleNamespace(metrics=self.metrics[run_id]),
         )
 
 
-def test_phase5a_statistics_use_mean_and_sample_standard_deviation() -> None:
+def test_split_rmse_statistics_use_mean_and_sample_standard_deviation() -> None:
     rows = []
     metrics = {}
     for model, seeds in (("zero", [42]), ("mlp", [7, 19, 42]), ("gnn", [7, 19, 42])):
@@ -41,11 +42,24 @@ def test_phase5a_statistics_use_mean_and_sample_standard_deviation() -> None:
                 )
             }
 
-    result = phase5a_statistics(FakeClient(metrics), rows)
+    result = split_rmse_statistics(FakeClient(metrics), rows, "12")
 
     assert result["zero"]["validation"] == {"mean": 1.0, "sample_std": 0.0}
     assert result["mlp"]["validation"]["mean"] == pytest.approx(2.0)
     assert result["mlp"]["validation"]["sample_std"] == pytest.approx(1.0)
+
+
+def test_split_rmse_statistics_rejects_run_from_another_experiment() -> None:
+    rows = [{"model": "zero", "training_seed": 42, "run_id": "zero-42"}]
+    metrics = {
+        "zero-42": {
+            f"{split}/rmse_mm": 1.0
+            for split in ("validation", "iid_test", "geometry_ood", "topology_size_ood")
+        }
+    }
+
+    with pytest.raises(ValueError, match="not in experiment"):
+        split_rmse_statistics(FakeClient(metrics, experiment_id="other"), rows, "12")
 
 
 def synthetic_summary() -> dict:

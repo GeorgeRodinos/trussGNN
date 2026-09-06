@@ -1,4 +1,4 @@
-"""End-to-end tests for the Phase 4D3 MLflow experiment runner."""
+"""End-to-end tests for the MLflow experiment runner."""
 
 from pathlib import Path
 
@@ -27,7 +27,7 @@ def isolated_mlflow(monkeypatch):
 
 @pytest.fixture(scope="module")
 def tiny_dataset(tmp_path_factory) -> Path:
-    directory = tmp_path_factory.mktemp("phase4d3-data")
+    directory = tmp_path_factory.mktemp("experiment-data")
     counts = {name: 1 for name in SPLIT_NAMES}
     save_dataset(generate_dataset(GenerationConfig(seed=31, split_counts=counts)), directory)
     return directory
@@ -37,7 +37,7 @@ def tiny_dataset(tmp_path_factory) -> Path:
 def tracking(tmp_path):
     return resolve_tracking_config(
         f"sqlite:///{(tmp_path / 'tracking.db').as_posix()}",
-        "Phase4D3-Test",
+        "Experiment-Test",
         environment={},
     )
 
@@ -81,6 +81,7 @@ def test_models_share_evaluation_contract_and_log_complete_runs(
         for metrics in result.final_metrics.values()
     )
     assert logged.info.status == "FINISHED"
+    assert logged.info.run_name == f"{model_name}-experiment"
     assert logged.data.params["model"] == model_name
     for split in result.final_metrics:
         assert f"{split}/loss" in logged.data.metrics
@@ -172,7 +173,7 @@ def test_cli_completes_against_temporary_store(tiny_dataset, tracking, capsys) -
         ]
     )
     output = capsys.readouterr().out
-    assert "Experiment: Phase4D3-Test" in output
+    assert "Experiment: Experiment-Test" in output
     assert "Run ID:" in output
     assert tracking.tracking_uri not in output
     assert mlflow.active_run() is None

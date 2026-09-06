@@ -45,7 +45,7 @@ def build_model(
     layer_count: int,
     dropout: float,
 ) -> nn.Module:
-    """Construct one of the three accepted displacement models."""
+    """Construct one of the three supported displacement models."""
 
     if name == "zero":
         stats = dataset.normalization
@@ -106,7 +106,7 @@ def run_experiment(
         with redirect_stdout(StringIO()):
             with mlflow.start_run(
                 experiment_id=experiment.experiment_id,
-                run_name=run_name or f"{model_name}-phase-4",
+                run_name=run_name or f"{model_name}-experiment",
             ) as run:
                 mlflow.log_params(parameters)
 

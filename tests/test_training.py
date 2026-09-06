@@ -1,4 +1,4 @@
-"""Focused tests for deterministic Phase 4D2 training."""
+"""Focused tests for deterministic model training."""
 
 from pathlib import Path
 

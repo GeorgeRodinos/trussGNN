@@ -1,4 +1,4 @@
-"""Focused tests for Phase 5B per-graph error analysis."""
+"""Focused tests for per-graph error analysis."""
 
 from dataclasses import replace
 import json
@@ -12,9 +12,10 @@ from trussgnn.analysis.error_analysis import (
     PerGraphError,
     assign_magnitude_groups,
     build_summary,
-    load_verified_model,
+    load_run_model,
     paired_comparisons,
     per_graph_metrics,
+    resolve_experiment_id,
     write_analysis,
 )
 from trussgnn.data import LoadedDataset, NormalizationStats
@@ -154,7 +155,7 @@ def test_output_is_deterministic_and_contains_no_secrets(tmp_path) -> None:
 
 
 class FakeClient:
-    def __init__(self, *, status="FINISHED", model="zero", seed="42", experiment="1352"):
+    def __init__(self, *, status="FINISHED", model="zero", seed="42", experiment="12"):
         self.run = SimpleNamespace(
             info=SimpleNamespace(status=status, experiment_id=experiment),
             data=SimpleNamespace(params={"model": model, "seed": seed}),
@@ -179,8 +180,8 @@ def empty_dataset(normalization) -> LoadedDataset:
 )
 def test_invalid_mlflow_run_raises_clear_error(client, message, normalization, tmp_path) -> None:
     with pytest.raises(ValueError, match=message):
-        load_verified_model(
-            client, "run", "zero", 42, "1352", empty_dataset(normalization), tmp_path
+        load_run_model(
+            client, "run", "zero", 42, "12", empty_dataset(normalization), tmp_path
         )
 
 
@@ -188,8 +189,8 @@ def test_zero_model_is_reconstructed_without_training_or_checkpoint(
     normalization, tmp_path
 ) -> None:
     client = FakeClient()
-    model = load_verified_model(
-        client, "run", "zero", 42, "1352", empty_dataset(normalization), tmp_path
+    model = load_run_model(
+        client, "run", "zero", 42, "12", empty_dataset(normalization), tmp_path
     )
 
     assert list(model.parameters()) == []
@@ -201,3 +202,15 @@ def test_analysis_module_does_not_import_training_functions() -> None:
 
     assert not hasattr(module, "fit_model")
     assert not hasattr(module, "train_one_epoch")
+
+
+def test_experiment_id_is_resolved_by_name() -> None:
+    client = SimpleNamespace(
+        get_experiment_by_name=lambda name: SimpleNamespace(experiment_id="12")
+        if name == "TrussGNN"
+        else None
+    )
+
+    assert resolve_experiment_id(client, "TrussGNN") == "12"
+    with pytest.raises(ValueError, match="Missing.*does not exist"):
+        resolve_experiment_id(client, "Missing")

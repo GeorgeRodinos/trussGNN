@@ -1,4 +1,4 @@
-"""Resolve MLflow settings and record a Phase 4A connection check."""
+"""Resolve MLflow settings and record a connection check."""
 
 from contextlib import redirect_stdout
 from dataclasses import dataclass
@@ -30,7 +30,7 @@ class TrackingConfig:
 
 @dataclass(frozen=True)
 class ConnectionCheckResult:
-    """Identifiers produced by a successful Phase 4A smoke run."""
+    """Identifiers produced by a successful connection-check run."""
 
     experiment_name: str
     experiment_id: str
@@ -136,17 +136,17 @@ def configure_experiment(config: TrackingConfig) -> Experiment:
 
 
 def _log_connection_check(experiment_id: str, run_name: str) -> str:
-    """Log and close one short Phase 4A run."""
+    """Log and close one short connection-check run."""
 
     # MLflow prints raw server links on run closure. The CLI prints a sanitized
     # destination instead, so suppress those links here.
     with redirect_stdout(StringIO()):
         with mlflow.start_run(experiment_id=experiment_id, run_name=run_name) as run:
-            mlflow.log_params({"phase": "4A", "check_type": "mlflow_connection"})
+            mlflow.log_param("check_type", "mlflow_connection")
             mlflow.log_metric("connection_check", 1.0)
-            mlflow.set_tags({"phase": "4A", "purpose": "tracking_smoke_test"})
+            mlflow.set_tag("purpose", "tracking_smoke_test")
             mlflow.log_dict(
-                {"status": "success", "phase": "4A", "purpose": "tracking_smoke_test"},
+                {"status": "success", "purpose": "tracking_smoke_test"},
                 "connection_check.json",
             )
             return run.info.run_id
@@ -154,7 +154,7 @@ def _log_connection_check(experiment_id: str, run_name: str) -> str:
 
 def run_connection_check(
     config: TrackingConfig,
-    run_name: str = "phase-4a-connection-check",
+    run_name: str = "mlflow-connection-check",
 ) -> ConnectionCheckResult:
     """Create/select an experiment and record one short, finished smoke run."""
 

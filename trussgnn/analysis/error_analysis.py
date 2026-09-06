@@ -1,4 +1,4 @@
-"""Analyse verified Phase 5A checkpoints one graph at a time."""
+"""Analyse tracked model checkpoints one graph at a time."""
 
 import argparse
 import csv
@@ -232,18 +232,18 @@ def write_analysis(
             record.graph_id,
         ),
     )
-    csv_path = output / "phase5b_per_graph.csv"
+    csv_path = output / "per_graph_errors.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=list(asdict(ordered[0])))
         writer.writeheader()
         writer.writerows(asdict(record) for record in ordered)
 
-    json_path = output / "phase5b_summary.json"
+    json_path = output / "error_summary.json"
     json_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return csv_path, json_path
 
 
-def load_verified_model(
+def load_run_model(
     client: MlflowClient,
     run_id: str,
     expected_model: str,
@@ -252,7 +252,7 @@ def load_verified_model(
     dataset: LoadedDataset,
     checkpoint_dir: Path,
 ) -> nn.Module:
-    """Verify one Phase 5A run and reconstruct its accepted model."""
+    """Validate one tracked run and reconstruct its model."""
 
     run = client.get_run(run_id)
     if run.info.status != "FINISHED":
@@ -284,6 +284,15 @@ def load_verified_model(
     return model
 
 
+def resolve_experiment_id(client: MlflowClient, experiment_name: str) -> str:
+    """Return the ID for an existing named MLflow experiment."""
+
+    experiment = client.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        raise ValueError(f"MLflow experiment {experiment_name!r} does not exist")
+    return experiment.experiment_id
+
+
 def run_error_analysis(
     dataset_dir: str | Path,
     tracking_uri: str,
@@ -291,14 +300,15 @@ def run_error_analysis(
     zero_run_id: str,
     mlp_run_ids: Sequence[str],
     gnn_run_ids: Sequence[str],
-    experiment_id: str = "1352",
+    experiment_name: str = "TrussGNN",
 ) -> tuple[Path, Path, list[PerGraphError], dict]:
-    """Verify seven runs, evaluate every graph, and write the Phase 5B analysis."""
+    """Validate seven runs, evaluate every graph, and write error analysis."""
 
     if len(mlp_run_ids) != 3 or len(gnn_run_ids) != 3:
         raise ValueError("Exactly three MLP and three GNN run IDs are required")
     dataset = load_dataset(dataset_dir)
     client = MlflowClient(tracking_uri=tracking_uri)
+    experiment_id = resolve_experiment_id(client, experiment_name)
     run_specs = [("zero", 42, zero_run_id)]
     run_specs += [("mlp", seed, run_id) for seed, run_id in zip((7, 19, 42), mlp_run_ids)]
     run_specs += [("gnn", seed, run_id) for seed, run_id in zip((7, 19, 42), gnn_run_ids)]
@@ -307,7 +317,7 @@ def run_error_analysis(
     with TemporaryDirectory() as temporary_directory:
         checkpoint_dir = Path(temporary_directory)
         for model_name, seed, run_id in run_specs:
-            model = load_verified_model(
+            model = load_run_model(
                 client, run_id, model_name, seed, experiment_id, dataset, checkpoint_dir
             )
             for split in EVALUATION_SPLITS:
@@ -334,7 +344,7 @@ def parse_args(arguments: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dataset-dir", type=Path, required=True)
     parser.add_argument("--tracking-uri", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--experiment-id", default="1352")
+    parser.add_argument("--experiment-name", default="TrussGNN")
     parser.add_argument("--zero-run-id", required=True)
     parser.add_argument("--mlp-run-ids", nargs=3, required=True)
     parser.add_argument("--gnn-run-ids", nargs=3, required=True)
@@ -350,7 +360,7 @@ def main(arguments: Sequence[str] | None = None) -> None:
         args.zero_run_id,
         args.mlp_run_ids,
         args.gnn_run_ids,
-        args.experiment_id,
+        args.experiment_name,
     )
     print(f"Saved {len(records)} per-graph rows to {csv_path}")
     print(f"Saved summary to {json_path}")

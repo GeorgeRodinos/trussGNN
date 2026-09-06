@@ -1,4 +1,4 @@
-"""Isolated verification of the Phase 4A MLflow tracking foundation."""
+"""Isolated verification of the MLflow tracking foundation."""
 
 import json
 from pathlib import Path
@@ -7,6 +7,7 @@ import mlflow
 import pytest
 from mlflow import MlflowClient
 
+import trussgnn.experiments.tracking as tracking_module
 from trussgnn.experiments.check_mlflow import main
 from trussgnn.experiments.tracking import (
     TrackingConnectionError,
@@ -34,7 +35,7 @@ def tracking_config(tmp_path: Path):
     tracking_uri = f"sqlite:///{(tmp_path / 'mlflow.db').as_posix()}"
     return resolve_tracking_config(
         tracking_uri=tracking_uri,
-        experiment_name="Phase4A-Test",
+        experiment_name="Tracking-Test",
         environment={},
     )
 
@@ -50,9 +51,9 @@ def test_connection_check_creates_finished_verifiable_run_and_artifact(tracking_
     assert experiment is not None
     assert experiment.experiment_id == result.experiment_id
     assert run.info.status == "FINISHED"
-    assert run.data.params == {"phase": "4A", "check_type": "mlflow_connection"}
+    assert run.info.run_name == "mlflow-connection-check"
+    assert run.data.params == {"check_type": "mlflow_connection"}
     assert run.data.metrics["connection_check"] == pytest.approx(1.0)
-    assert run.data.tags["phase"] == "4A"
     assert run.data.tags["purpose"] == "tracking_smoke_test"
     assert any(artifact.path == "connection_check.json" for artifact in artifacts)
 
@@ -60,7 +61,6 @@ def test_connection_check_creates_finished_verifiable_run_and_artifact(tracking_
     artifact = json.loads(Path(artifact_path).read_text(encoding="utf-8"))
     assert artifact == {
         "status": "success",
-        "phase": "4A",
         "purpose": "tracking_smoke_test",
     }
     assert mlflow.active_run() is None
@@ -117,13 +117,16 @@ def test_malformed_port_is_safely_omitted_during_redaction() -> None:
 
 
 def test_invalid_explicit_endpoint_raises_without_fallback(monkeypatch) -> None:
-    monkeypatch.setenv("MLFLOW_HTTP_REQUEST_MAX_RETRIES", "0")
-    monkeypatch.setenv("MLFLOW_HTTP_REQUEST_TIMEOUT", "1")
     config = resolve_tracking_config(
         tracking_uri="http://127.0.0.1:1?token=do-not-display",
         experiment_name="Unavailable",
         environment={},
     )
+
+    def fail_without_connecting(_config):
+        raise RuntimeError("simulated connection failure")
+
+    monkeypatch.setattr(tracking_module, "_configure_mlflow", fail_without_connecting)
 
     with pytest.raises(TrackingConnectionError) as caught:
         run_connection_check(config)

@@ -1,1 +1,1 @@
-"""Focused Phase 5 model-error analysis."""
+"""Focused model-error analysis."""

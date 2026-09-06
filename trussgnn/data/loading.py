@@ -1,4 +1,4 @@
-"""Load, normalize, batch, and identify an accepted Phase 3 dataset."""
+"""Load, normalize, batch, and identify a generated dataset."""
 
 import json
 from dataclasses import dataclass
@@ -60,7 +60,7 @@ def _tensor(values: object, expected_size: int, label: str) -> torch.Tensor:
 
 
 def load_normalization(directory: str | Path) -> NormalizationStats:
-    """Load and validate the training-only Phase 3 normalization JSON."""
+    """Load and validate the training-only normalization JSON."""
 
     path = Path(directory) / "normalization.json"
     if not path.is_file():

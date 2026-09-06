@@ -24,7 +24,7 @@ Each node contains `[x, y, fx, fy, fixed_x, fixed_y]`. Each directed edge contai
 
 ## Dataset
 
-The accepted dataset uses seed 42 and contains one controlled family of triangular-chain trusses:
+The evaluation dataset uses seed 42 and contains one controlled family of triangular-chain trusses:
 
 | Split | Graphs | Purpose |
 |---|---:|---|
@@ -38,7 +38,7 @@ The accepted dataset uses seed 42 and contains one controlled family of triangul
 
 The MLP and GNN were trained with seeds 7, 19, and 42 using Adam, batch size 32, learning rate 0.001, and validation-based early stopping. The best validation checkpoint was restored before evaluating test splits. Metrics use physical free-DOF displacement: RMSE and MAE in millimetres, plus relative L2 calculated independently per graph.
 
-### Phase 5A RMSE
+### Aggregate RMSE results
 
 Learned-model values are mean ± sample standard deviation across three training seeds.
 
@@ -52,7 +52,7 @@ Learned-model values are mean ± sample standard deviation across three training
 
 The GNN outperformed the paired MLP in all 12 seed/split comparisons. Its absolute OOD error remained the lowest, although both learned models degraded outside the training distribution.
 
-## Phase 5B error analysis
+## Per-graph error analysis
 
 The MLP's relative error was concentrated in low-displacement graphs: its mean relative L2 was approximately 4.65 for low-magnitude validation and IID graphs, despite improved aggregate RMSE. The GNN reduced this to 0.75 on validation and 0.59 on IID. Topology/size-OOD absolute error increased with panel count; mean GNN per-graph RMSE rose from 0.068 mm at six panels to 0.286 mm at eight panels.
 
@@ -71,16 +71,27 @@ python -m pip install -e ".[test]"
 python -m pytest -q
 ```
 
-Generate the final figures from existing Phase 5B artifacts and the verified MLflow server:
+Generate the deterministic dataset:
 
 ```bash
-python -m trussgnn.analysis.plot_results \
-  --dataset-dir data/processed \
-  --per-graph-csv artifacts/phase5b/phase5b_per_graph.csv \
-  --summary-json artifacts/phase5b/phase5b_summary.json \
-  --tracking-uri <MLFLOW_TRACKING_URI> \
-  --output-dir docs/figures
+python -m trussgnn.data.generate_dataset \
+  --output data/processed \
+  --seed 42
 ```
+
+Run one example GNN experiment using the project's local MLflow default:
+
+```bash
+python -m trussgnn.experiments.run_experiment \
+  --dataset-dir data/processed \
+  --model gnn \
+  --experiment-name TrussGNN \
+  --run-name gnn-seed42 \
+  --seed 42 \
+  --layers 3
+```
+
+The checked-in figures summarize the completed multi-seed evaluation. Generated datasets, checkpoints, analysis outputs and MLflow state are intentionally excluded from version control.
 
 ## Limitations
 

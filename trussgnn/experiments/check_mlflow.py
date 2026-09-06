@@ -10,7 +10,7 @@ def parse_args(arguments: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tracking-uri")
     parser.add_argument("--experiment-name")
-    parser.add_argument("--run-name", default="phase-4a-connection-check")
+    parser.add_argument("--run-name", default="mlflow-connection-check")
     return parser.parse_args(arguments)
 
 

@@ -1,4 +1,4 @@
-"""Focused verification of the deterministic Phase 3 dataset pipeline."""
+"""Focused verification of the deterministic dataset pipeline."""
 
 import copy
 

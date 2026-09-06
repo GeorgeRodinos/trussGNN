@@ -1,4 +1,4 @@
-"""PyTorch Geometric conversion, statistics, and persistence for Phase 3."""
+"""PyTorch Geometric conversion, statistics, and persistence."""
 
 import json
 from dataclasses import asdict, dataclass

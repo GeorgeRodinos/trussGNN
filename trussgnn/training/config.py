@@ -8,7 +8,7 @@ import torch
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    """Small set of options needed by the Phase 4D2 training loop."""
+    """Small set of options needed by the deterministic training loop."""
 
     max_epochs: int = 100
     learning_rate: float = 1e-3

@@ -1,4 +1,4 @@
-"""Tests for Phase 4D1 masked loss and physical displacement metrics."""
+"""Tests for masked loss and physical displacement metrics."""
 
 import pytest
 import torch

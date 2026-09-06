@@ -1,4 +1,4 @@
-"""Verification examples for the Phase 2 linear truss solver."""
+"""Verification examples for the linear truss solver."""
 
 import numpy as np
 import pytest

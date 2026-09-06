@@ -1,4 +1,4 @@
-"""Create the three concise Phase 5 result figures."""
+"""Create the three concise evaluation result figures."""
 
 import argparse
 import csv
@@ -16,19 +16,18 @@ from mlflow import MlflowClient
 import numpy as np
 import torch
 
-from trussgnn.analysis.error_analysis import load_verified_model
+from trussgnn.analysis.error_analysis import load_run_model, resolve_experiment_id
 from trussgnn.data import enforce_boundary_conditions, inverse_targets, load_dataset
 
 
 SPLITS = ("validation", "iid_test", "geometry_ood", "topology_size_ood")
 SPLIT_LABELS = ("Validation", "IID", "Geometry OOD", "Topology/size OOD")
 MODELS = ("zero", "mlp", "gnn")
-EXPERIMENT_ID = "1352"
 AMPLIFICATION_FACTOR = 500.0
 
 
 def read_per_graph_csv(path: str | Path) -> list[dict]:
-    """Read the Phase 5B CSV into small typed dictionaries."""
+    """Read the per-graph error CSV into small typed dictionaries."""
 
     rows = []
     with Path(path).open(newline="", encoding="utf-8") as file:
@@ -48,7 +47,9 @@ def read_per_graph_csv(path: str | Path) -> list[dict]:
     return rows
 
 
-def phase5a_statistics(client: MlflowClient, rows: list[dict]) -> dict:
+def split_rmse_statistics(
+    client: MlflowClient, rows: list[dict], experiment_id: str
+) -> dict:
     """Read split RMSE and calculate learned-model mean and sample deviation."""
 
     identities = sorted(
@@ -59,6 +60,8 @@ def phase5a_statistics(client: MlflowClient, rows: list[dict]) -> dict:
         run = client.get_run(run_id)
         if run.info.status != "FINISHED":
             raise ValueError(f"MLflow run {run_id} is not FINISHED")
+        if run.info.experiment_id != experiment_id:
+            raise ValueError(f"MLflow run {run_id} is not in experiment {experiment_id}")
         for split in SPLITS:
             values[model][split].append(run.data.metrics[f"{split}/rmse_mm"])
 
@@ -79,7 +82,7 @@ def phase5a_statistics(client: MlflowClient, rows: list[dict]) -> dict:
 
 
 def plot_model_comparison(statistics_by_model: dict, output_path: str | Path) -> None:
-    """Plot Phase 5A split-level RMSE with training-seed error bars."""
+    """Plot split-level RMSE with training-seed error bars."""
 
     x = np.arange(len(SPLITS))
     width = 0.25
@@ -246,16 +249,19 @@ def generate_figures(
     summary_json: str | Path,
     tracking_uri: str,
     output_dir: str | Path,
+    experiment_name: str = "TrussGNN",
 ) -> dict:
-    """Read verified results and create exactly three Phase 5 figures."""
+    """Read tracked results and create exactly three evaluation figures."""
 
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     rows = read_per_graph_csv(per_graph_csv)
     summary = json.loads(Path(summary_json).read_text(encoding="utf-8"))
     client = MlflowClient(tracking_uri=tracking_uri)
+    experiment_id = resolve_experiment_id(client, experiment_name)
     plot_model_comparison(
-        phase5a_statistics(client, rows), output / "model_comparison.png"
+        split_rmse_statistics(client, rows, experiment_id),
+        output / "model_comparison.png",
     )
     plot_error_analysis(summary, output / "error_analysis.png")
 
@@ -267,12 +273,12 @@ def generate_figures(
         if int(graph.graph_id) == record["graph_id"]
     )
     with TemporaryDirectory() as temporary_directory:
-        model = load_verified_model(
+        model = load_run_model(
             client,
             record["run_id"],
             "gnn",
             42,
-            EXPERIMENT_ID,
+            experiment_id,
             dataset,
             Path(temporary_directory),
         )
@@ -296,6 +302,7 @@ def parse_args(arguments: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--summary-json", type=Path, required=True)
     parser.add_argument("--tracking-uri", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--experiment-name", default="TrussGNN")
     return parser.parse_args(arguments)
 
 
@@ -307,6 +314,7 @@ def main(arguments: Sequence[str] | None = None) -> None:
         args.summary_json,
         args.tracking_uri,
         args.output_dir,
+        args.experiment_name,
     )
     print(f"Created three figures in {args.output_dir}")
     print(f"Representative graph: {record['graph_id']}")

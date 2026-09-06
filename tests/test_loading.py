@@ -1,4 +1,4 @@
-"""Verification of Phase 4B loading, normalization, batching, and identity."""
+"""Verification of loading, normalization, batching, and identity."""
 
 import json
 from dataclasses import replace
@@ -21,9 +21,9 @@ from trussgnn.data.loading import (
 
 @pytest.fixture(scope="module")
 def dataset_directory(tmp_path_factory) -> Path:
-    """Generate one tiny temporary Phase 3 dataset for all loading tests."""
+    """Generate one tiny temporary dataset for all loading tests."""
 
-    directory = tmp_path_factory.mktemp("phase4b-dataset")
+    directory = tmp_path_factory.mktemp("loading-dataset")
     counts = {name: (4 if name == "train" else 2) for name in SPLIT_NAMES}
     bundle = generate_dataset(GenerationConfig(seed=31, split_counts=counts))
     save_dataset(bundle, directory)
@@ -206,7 +206,7 @@ def test_evaluation_loader_order_is_unchanged_and_deterministic(loaded) -> None:
         assert graph_order(second[name]) == expected
 
 
-def test_normalization_matches_phase3_training_statistics(loaded, raw_splits) -> None:
+def test_normalization_matches_training_statistics(loaded, raw_splits) -> None:
     training_nodes = torch.cat([graph.x[:, :4] for graph in raw_splits["train"]])
     stats = loaded.normalization
 

@@ -1,4 +1,4 @@
-"""Focused tests for the three Phase 4C node-level models."""
+"""Focused tests for the three node-level models."""
 
 from io import BytesIO
 
