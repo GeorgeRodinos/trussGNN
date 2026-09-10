@@ -2,9 +2,9 @@
 
 import copy
 import random
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 import torch
@@ -15,6 +15,7 @@ from trussgnn.data.loading import NormalizationStats
 
 from .config import TrainingConfig
 from .metrics import masked_mse, physical_metrics
+from .physics import equilibrium_residual_loss, relative_equilibrium_residuals
 
 
 @dataclass(frozen=True)
@@ -45,32 +46,87 @@ def seed_everything(seed: int) -> None:
         torch.backends.cudnn.deterministic = True
 
 
+def _train_epoch(
+    model: nn.Module,
+    training_loader: Iterable[Data],
+    optimizer: torch.optim.Optimizer,
+    device: str | torch.device,
+    normalization: NormalizationStats | None,
+    config: TrainingConfig | None,
+) -> dict[str, float]:
+    """Train once and aggregate data by DOFs and physics by graphs.
+
+    Each batch optimizes the sum of its two batch means. The epoch summary
+    recombines the split-wide DOF-weighted data loss and graph-weighted physics
+    loss, instead of averaging batch objectives of unequal sizes.
+    """
+
+    physics_weight = config.physics_loss_weight if config is not None else 0.0
+    physics_epsilon = config.physics_epsilon if config is not None else 1e-12
+    if physics_weight > 0 and normalization is None:
+        raise ValueError("Positive physics_loss_weight requires normalization statistics")
+
+    model.train()
+    squared_error_sum = 0.0
+    free_dof_count = 0
+    physics_loss_sum = 0.0
+    graph_count = 0
+    for batch in training_loader:
+        batch = batch.to(device)
+        optimizer.zero_grad()
+        prediction = model(batch)
+        data_loss = masked_mse(prediction, batch.y, batch.free_dof_mask)
+        if physics_weight > 0:
+            physics_loss = equilibrium_residual_loss(
+                prediction,
+                batch,
+                normalization,
+                epsilon=physics_epsilon,
+            )
+            total_loss = data_loss + physics_weight * physics_loss
+        else:
+            physics_loss = None
+            total_loss = data_loss
+        total_loss.backward()
+        optimizer.step()
+
+        count = int(batch.free_dof_mask.sum().item())
+        squared_error_sum += float(data_loss.detach().item()) * count
+        free_dof_count += count
+        if physics_loss is not None:
+            batch_graphs = getattr(batch, "num_graphs", None)
+            if batch_graphs is None:
+                batch_graphs = 1
+            physics_loss_sum += float(physics_loss.detach().item()) * batch_graphs
+            graph_count += batch_graphs
+
+    if free_dof_count == 0:
+        raise ValueError("Training loader is empty or contains no free DOFs")
+    data_epoch_loss = squared_error_sum / free_dof_count
+    physics_epoch_loss = physics_loss_sum / graph_count if graph_count else 0.0
+    return {
+        "data_loss": data_epoch_loss,
+        "physics_loss": physics_epoch_loss,
+        "total_loss": data_epoch_loss + physics_weight * physics_epoch_loss,
+    }
+
+
 def train_one_epoch(
     model: nn.Module,
     training_loader: Iterable[Data],
     optimizer: torch.optim.Optimizer,
     device: str | torch.device,
+    normalization: NormalizationStats | None = None,
+    config: TrainingConfig | None = None,
 ) -> float:
-    """Train once and return MSE weighted by the number of free DOFs."""
+    """Train once and return the aggregated total loss.
 
-    model.train()
-    squared_error_sum = 0.0
-    free_dof_count = 0
-    for batch in training_loader:
-        batch = batch.to(device)
-        optimizer.zero_grad()
-        prediction = model(batch)
-        loss = masked_mse(prediction, batch.y, batch.free_dof_mask)
-        loss.backward()
-        optimizer.step()
+    Omitting ``config`` preserves the original supervised-only path and return value.
+    """
 
-        count = int(batch.free_dof_mask.sum().item())
-        squared_error_sum += float(loss.detach().item()) * count
-        free_dof_count += count
-
-    if free_dof_count == 0:
-        raise ValueError("Training loader is empty or contains no free DOFs")
-    return squared_error_sum / free_dof_count
+    return _train_epoch(
+        model, training_loader, optimizer, device, normalization, config
+    )["total_loss"]
 
 
 def evaluate_model(
@@ -78,6 +134,7 @@ def evaluate_model(
     data_loader: Iterable[Data],
     device: str | torch.device,
     normalization: NormalizationStats,
+    physics_epsilon: float = 1e-12,
 ) -> dict[str, float]:
     """Evaluate one complete split without weighting batches equally."""
 
@@ -86,12 +143,31 @@ def evaluate_model(
     targets: list[torch.Tensor] = []
     masks: list[torch.Tensor] = []
     memberships: list[torch.Tensor] = []
+    equilibrium_residuals: list[torch.Tensor] = []
+    equilibrium_available: bool | None = None
     graph_offset = 0
 
     with torch.no_grad():
         for batch in data_loader:
             batch = batch.to(device)
             prediction = model(batch)
+            has_physics_fields = all(
+                getattr(batch, name, None) is not None
+                for name in ("pos", "edge_index", "edge_attr")
+            )
+            if equilibrium_available is None:
+                equilibrium_available = has_physics_fields
+            elif equilibrium_available != has_physics_fields:
+                raise ValueError("Evaluation batches have inconsistent physics fields")
+            if has_physics_fields:
+                equilibrium_residuals.append(
+                    relative_equilibrium_residuals(
+                        prediction,
+                        batch,
+                        normalization,
+                        epsilon=physics_epsilon,
+                    )
+                )
             predictions.append(prediction)
             targets.append(batch.y)
             masks.append(batch.free_dof_mask)
@@ -111,6 +187,10 @@ def evaluate_model(
     combined = Data(batch=torch.cat(memberships))
     result = physical_metrics(prediction, target, mask, combined, normalization)
     result["loss"] = float(masked_mse(prediction, target, mask).item())
+    if equilibrium_residuals:
+        residuals = torch.cat(equilibrium_residuals)
+        result["physics_loss"] = float(residuals.square().mean().item())
+        result["mean_equilibrium_residual"] = float(residuals.mean().item())
     return {"loss": result.pop("loss"), **result}
 
 
@@ -146,10 +226,41 @@ def fit_model(
     stopped_early = False
 
     for epoch in range(1, config.max_epochs + 1):
-        train_loss = train_one_epoch(model, training_loader, optimizer, device)
-        validation = evaluate_model(model, validation_loader, device, normalization)
+        training_losses = _train_epoch(
+            model,
+            training_loader,
+            optimizer,
+            device,
+            normalization,
+            config,
+        )
+        validation = evaluate_model(
+            model,
+            validation_loader,
+            device,
+            normalization,
+            config.physics_epsilon,
+        )
+        validation_physics_loss = validation.get("physics_loss", 0.0)
+        if config.physics_loss_weight > 0 and "physics_loss" not in validation:
+            raise ValueError(
+                "Positive physics_loss_weight requires validation physics fields"
+            )
+        validation_total_loss = validation["loss"] + (
+            config.physics_loss_weight * validation_physics_loss
+        )
         history.append(
-            {"epoch": epoch, "train_loss": train_loss, **validation}
+            {
+                "epoch": epoch,
+                "train_loss": training_losses["data_loss"],
+                "train_data_loss": training_losses["data_loss"],
+                "train_physics_loss": training_losses["physics_loss"],
+                "train_total_loss": training_losses["total_loss"],
+                "validation_data_loss": validation["loss"],
+                "validation_physics_loss": validation_physics_loss,
+                "validation_total_loss": validation_total_loss,
+                **validation,
+            }
         )
 
         if validation["rmse_m"] < best_rmse - config.min_delta:

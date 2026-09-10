@@ -1,7 +1,5 @@
 """Focused tests for deterministic model training."""
 
-from pathlib import Path
-
 import pytest
 import torch
 from torch import nn
@@ -30,7 +28,17 @@ def make_graph(value: float = 1.0, nodes: int = 2, dtype=torch.float32) -> Data:
     y = torch.stack((0.2 * x[:, 0], -0.1 * x[:, 0]), dim=1)
     mask = torch.ones((nodes, 2), dtype=torch.bool)
     mask[0, 1] = False
-    return Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y, free_dof_mask=mask)
+    pos = torch.stack(
+        (torch.arange(nodes, dtype=dtype), torch.zeros(nodes, dtype=dtype)), dim=1
+    )
+    return Data(
+        x=x,
+        pos=pos,
+        edge_index=edge_index,
+        edge_attr=edge_attr,
+        y=y,
+        free_dof_mask=mask,
+    )
 
 
 def make_normalization() -> NormalizationStats:
@@ -140,14 +148,23 @@ def test_best_validation_state_is_restored_and_early_stopping_obeys_patience(
     def fake_train(model, *_args):
         with torch.no_grad():
             model.scale.add_(1)
-        return float(model.scale.detach().item())
+        loss = float(model.scale.detach().item())
+        return {"data_loss": loss, "physics_loss": 0.0, "total_loss": loss}
 
     def fake_evaluate(model, *_args):
         rmse = next(validation_rmse)
-        return {"loss": rmse, "mae_m": rmse, "mae_mm": rmse * 1000,
-                "rmse_m": rmse, "rmse_mm": rmse * 1000, "mean_graph_relative_l2": rmse}
+        return {
+            "loss": rmse,
+            "physics_loss": 0.0,
+            "mae_m": rmse,
+            "mae_mm": rmse * 1000,
+            "rmse_m": rmse,
+            "rmse_mm": rmse * 1000,
+            "mean_graph_relative_l2": rmse,
+            "mean_equilibrium_residual": 0.0,
+        }
 
-    monkeypatch.setattr(engine_module, "train_one_epoch", fake_train)
+    monkeypatch.setattr(engine_module, "_train_epoch", fake_train)
     monkeypatch.setattr(engine_module, "evaluate_model", fake_evaluate)
     config = TrainingConfig(max_epochs=10, patience=2, min_delta=0.1)
     result = fit_model(model, [], [], normalization, config, tmp_path / "best.pt")
@@ -173,6 +190,7 @@ def test_checkpoint_contains_required_fields(tmp_path, normalization) -> None:
     assert checkpoint["training_config"] == {
         "max_epochs": 1, "learning_rate": 0.001, "weight_decay": 0.0,
         "patience": 10, "min_delta": 0.0, "seed": 42, "device": "cpu",
+        "physics_loss_weight": 0.0, "physics_epsilon": 1e-12,
     }
 
 
@@ -208,6 +226,7 @@ def test_cuda_training(normalization) -> None:
     [
         {"max_epochs": 0}, {"learning_rate": 0}, {"weight_decay": -1},
         {"patience": -1}, {"min_delta": -1}, {"seed": -1}, {"device": "nonsense"},
+        {"physics_loss_weight": -1}, {"physics_epsilon": 0},
     ],
 )
 def test_invalid_training_configuration(kwargs) -> None:

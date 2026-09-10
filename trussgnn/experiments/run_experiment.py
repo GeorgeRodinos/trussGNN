@@ -14,10 +14,14 @@ from torch import nn
 
 from trussgnn.data import LoadedDataset, create_data_loaders, load_dataset
 from trussgnn.models import EdgeAwareGNN, NodeMLP, ZeroDisplacementBaseline
-from trussgnn.training import TrainingConfig, evaluate_model, fit_model, seed_everything
+from trussgnn.training import (
+    TrainingConfig,
+    evaluate_model,
+    fit_model,
+    seed_everything,
+)
 
 from .tracking import TrackingConfig, configure_experiment, resolve_tracking_config
-
 
 EVALUATION_SPLITS = (
     "validation",
@@ -73,6 +77,8 @@ def run_experiment(
     """Load data, train one model when needed, evaluate it, and log the run."""
 
     training = training or TrainingConfig()
+    if training.physics_loss_weight > 0 and model_name != "gnn":
+        raise ValueError("A positive physics loss weight is supported only for the GNN")
     dataset_dir = Path(dataset_dir)
     dataset = load_dataset(dataset_dir)
     loaders = create_data_loaders(dataset.splits, batch_size, training.seed, num_workers)
@@ -97,6 +103,8 @@ def run_experiment(
         "layer_count": layer_count,
         "dropout": dropout,
         "dataset_seed": dataset.metadata["seed"],
+        "physics_loss_weight": training.physics_loss_weight,
+        "physics_epsilon": training.physics_epsilon,
     }
 
     best_epoch = None
@@ -125,7 +133,17 @@ def run_experiment(
                         mlflow.log_metrics(
                             {
                                 "train/loss": epoch["train_loss"],
+                                "train/data_loss": epoch["train_data_loss"],
+                                "train/physics_loss": epoch["train_physics_loss"],
+                                "train/total_loss": epoch["train_total_loss"],
                                 "validation/loss": epoch["loss"],
+                                "validation/data_loss": epoch["validation_data_loss"],
+                                "validation/physics_loss": epoch[
+                                    "validation_physics_loss"
+                                ],
+                                "validation/total_loss": epoch[
+                                    "validation_total_loss"
+                                ],
                                 "validation/rmse_mm": epoch["rmse_mm"],
                             },
                             step=int(epoch["epoch"]),
@@ -136,7 +154,11 @@ def run_experiment(
                 )
                 for split in EVALUATION_SPLITS:
                     metrics = evaluate_model(
-                        model, loaders[split], device, dataset.normalization
+                        model,
+                        loaders[split],
+                        device,
+                        dataset.normalization,
+                        training.physics_epsilon,
                     )
                     final_metrics[split] = metrics
                     mlflow.log_metrics(
@@ -146,6 +168,9 @@ def run_experiment(
                             f"{split}/rmse_mm": metrics["rmse_mm"],
                             f"{split}/mean_graph_relative_l2": metrics[
                                 "mean_graph_relative_l2"
+                            ],
+                            f"{split}/mean_equilibrium_residual": metrics[
+                                "mean_equilibrium_residual"
                             ],
                         },
                         step=final_step,
@@ -189,6 +214,8 @@ def parse_args(arguments: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--hidden-dim", type=int, default=64)
     parser.add_argument("--layers", type=int, default=2)
     parser.add_argument("--dropout", type=float, default=0.0)
+    parser.add_argument("--physics-loss-weight", type=float, default=0.0)
+    parser.add_argument("--physics-epsilon", type=float, default=1e-12)
     return parser.parse_args(arguments)
 
 
@@ -203,6 +230,8 @@ def main(arguments: Sequence[str] | None = None) -> None:
         min_delta=args.min_delta,
         seed=args.seed,
         device=args.device,
+        physics_loss_weight=args.physics_loss_weight,
+        physics_epsilon=args.physics_epsilon,
     )
     result = run_experiment(
         args.dataset_dir,

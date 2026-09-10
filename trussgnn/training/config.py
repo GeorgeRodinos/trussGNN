@@ -1,7 +1,8 @@
 """Configuration for deterministic model training."""
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
+from numbers import Real
 
 import torch
 
@@ -17,6 +18,8 @@ class TrainingConfig:
     min_delta: float = 0.0
     seed: int = 42
     device: str = "cpu"
+    physics_loss_weight: float = 0.0
+    physics_epsilon: float = 1e-12
 
     def __post_init__(self) -> None:
         if not isinstance(self.max_epochs, int):
@@ -37,6 +40,21 @@ class TrainingConfig:
             raise ValueError("seed must be an integer")
         if self.seed < 0:
             raise ValueError("seed cannot be negative")
+        if isinstance(self.physics_loss_weight, bool) or not isinstance(
+            self.physics_loss_weight, Real
+        ):
+            raise ValueError("physics_loss_weight must be finite and non-negative")
+        if (
+            not math.isfinite(self.physics_loss_weight)
+            or self.physics_loss_weight < 0
+        ):
+            raise ValueError("physics_loss_weight must be finite and non-negative")
+        if isinstance(self.physics_epsilon, bool) or not isinstance(
+            self.physics_epsilon, Real
+        ):
+            raise ValueError("physics_epsilon must be finite and positive")
+        if not math.isfinite(self.physics_epsilon) or self.physics_epsilon <= 0:
+            raise ValueError("physics_epsilon must be finite and positive")
         try:
             device = torch.device(self.device)
         except (RuntimeError, ValueError) as error:
